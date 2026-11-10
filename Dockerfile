@@ -1,23 +1,22 @@
-# Multi-stage lightweight Python container
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
     PORT=8080
 
 WORKDIR /app
 
-# Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Copy source code and data
 COPY backend/ ./backend/
 
-# Expose port (Cloud Run sets $PORT dynamically)
+# Run as non-root
+RUN useradd --create-home appuser
+USER appuser
+
 EXPOSE 8080
 
-# Start Uvicorn server
-# CMD exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}
-# JSON args format with sh -c exec for dynamic $PORT expansion & clean signal handling
+# Cloud Run injects $PORT; exec keeps uvicorn as PID 1 for clean SIGTERM handling.
 CMD ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]

@@ -1,85 +1,117 @@
+"""FastAPI entrypoint for the Product Finder agent (Cloud Run target)."""
+
+import json
 import os
 import time
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
-from backend.agent.adk_agent import run_agent_turn
-from backend.services.filter_engine import filter_engine
-from backend.services.session_store import session_store
+load_dotenv()  # local dev only; Cloud Run / docker pass env vars directly
+
+from backend.agent.service import AgentService  # noqa: E402
+from backend.services.filter_engine import filter_engine  # noqa: E402
 
 app = FastAPI(
     title="Product Finder AI Agent API",
-    description="Backend service for deterministic product filter using Google ADK / Gemini.",
-    version="1.0.0",
+    description="Google ADK agent that extracts filters and applies them deterministically.",
+    version="2.0.0",
 )
 
-# Enable CORS for the frontend
+_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-class ChatRequest(BaseModel):
-    session_id: str
-    message: str
 
-class StateSyncRequest(BaseModel):
-    session_id: str
-    active_filters: Dict[str, Any]
+@lru_cache(maxsize=1)
+def get_agent_service() -> AgentService:
+    return AgentService()
+
+
+class ChatRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class StateRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    active_filters: Dict[str, Optional[Any]] = Field(default_factory=dict)
+
 
 @app.get("/")
 def root():
-    return {
-        "message": "Product Finder AI Agent API is running.",
-        "docs": "/docs",
-        "health": "/api/health"
-    }    
+    return {"service": "product-finder-agent", "docs": "/docs", "health": "/api/health"}
+
 
 @app.get("/api/health")
 def health():
-    """Health check endpoint used by Cloud Run and frontend wrapup probe.
-    """
     return {"status": "ok", "timestamp": time.time()}
 
+
+@app.get("/api/products")
+def list_products():
+    """Full catalog, used by the UI for instant client-side re-filtering."""
+    return {"products": filter_engine.products}
+
+
 @app.post("/api/chat")
-def chat(req: ChatRequest):
-    """Processes natural language user search queries."""
+async def chat(req: ChatRequest, service: AgentService = Depends(get_agent_service)):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    print(f"\n[API] Incoming /api/chat request for session '{req.session_id}': \"{req.message}\"", flush=True)
     try:
-        result = run_agent_turn(req.session_id, req.message)
-        print(f"[API] Successfully processed in {result.get('latency_ms')}ms with {len(result.get('products', []))} products", flush=True)
-        return result
-    except Exception as e:
-        import traceback
-        print(f"[API ERROR] {type(e).__name__}: {e}", flush=True)
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.post("/api/state/sync")
-def sync_state(req: StateSyncRequest):
-    """
-    Syncronizes manual client filter mutation (e.g., chip dismissals)
-    with the backend session memory and returns re-filtered products immediately.
-    """
-    session = session_store.get_or_create(req.session_id)
-    session["active_filters"] = req.active_filters
-    products = filter_engine.filter_products(**req.active_filters)
+        return await service.run_turn(req.session_id, req.message.strip())
+    except RuntimeError as exc:
+        # Upstream (Gemini) failure: report it honestly instead of faking an answer.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest, service: AgentService = Depends(get_agent_service)):
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    async def sse():
+        async for item in service.stream_turn(req.session_id, req.message.strip()):
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'])}\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/state")
+async def sync_state(req: StateRequest, service: AgentService = Depends(get_agent_service)):
+    """Syncs UI filter edits (chip dismissals, Clear All) into the agent's session state."""
+    try:
+        filters = await service.set_filters(req.session_id, req.active_filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    products = filter_engine.filter_products(**filters)
     return {
-        "status": "SYNCHRONIZED",
-        "active_filters": req.active_filters,
+        "session_id": req.session_id,
+        "active_filters": filters,
         "products": products,
-        "count": len(products),
+        "product_ids": [p["id"] for p in products],
     }
+
+
+@app.get("/api/state/{session_id}")
+async def get_state(session_id: str, service: AgentService = Depends(get_agent_service)):
+    return {"session_id": session_id, "active_filters": await service.get_filters(session_id)}
+
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True)
+
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
