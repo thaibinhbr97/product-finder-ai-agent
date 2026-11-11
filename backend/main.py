@@ -91,6 +91,7 @@ async def chat_stream(req: ChatRequest, service: AgentService = Depends(get_agen
 
 
 @app.post("/api/state")
+@app.post("/api/state/sync")
 async def sync_state(req: StateRequest, service: AgentService = Depends(get_agent_service)):
     """Syncs UI filter edits (chip dismissals, Clear All) into the agent's session state."""
     try:
@@ -99,10 +100,12 @@ async def sync_state(req: StateRequest, service: AgentService = Depends(get_agen
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     products = filter_engine.filter_products(**filters)
     return {
+        "status": "SYNCHRONIZED",
         "session_id": req.session_id,
         "active_filters": filters,
         "products": products,
         "product_ids": [p["id"] for p in products],
+        "count": len(products),
     }
 
 

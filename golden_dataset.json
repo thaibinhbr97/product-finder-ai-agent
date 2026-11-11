@@ -1,0 +1,100 @@
+[
+  {
+    "id": "case_01_category_basic",
+    "category_tag": "basic_category",
+    "initial_filters": {},
+    "input": "Show me all clothing items.",
+    "expected_filters": {
+      "category": "clothing"
+    },
+    "expected_product_ids": [0, 5, 7, 8],
+    "expected_summary": "Matching clothing items are UBC Hoodie ($45), Running Shoes ($89), T-Shirt ($15), and Denim Jacket ($75)."
+  },
+  {
+    "id": "case_02_combined_threshold",
+    "category_tag": "combined_category_price",
+    "initial_filters": {},
+    "input": "What clothing items are under $50?",
+    "expected_filters": {
+      "category": "clothing",
+      "max_price": 50.0
+    },
+    "expected_product_ids": [0, 7],
+    "expected_summary": "The clothing items under $50 are the UBC Hoodie ($45) and the T-Shirt ($15). Pricier items like Running Shoes ($89) and Denim Jacket ($75) are excluded."
+  },
+  {
+    "id": "case_03_price_range_synonym",
+    "category_tag": "edge_synonym_and_range",
+    "initial_filters": {},
+    "input": "Show me tech gadgets between 100 and 300 bucks.",
+    "expected_filters": {
+      "category": "electronics",
+      "min_price": 100.0,
+      "max_price": 300.0
+    },
+    "expected_product_ids": [2, 3],
+    "expected_summary": "The electronics between $100 and $300 are Bluetooth Headphones ($199) and Smartwatch ($249)."
+  },
+  {
+    "id": "case_04_empty_result_impossible_price",
+    "category_tag": "edge_empty_results",
+    "initial_filters": {},
+    "input": "Show me groceries over $100.",
+    "expected_filters": {
+      "category": "groceries",
+      "min_price": 100.0
+    },
+    "expected_product_ids": [],
+    "expected_summary": "No groceries were found over $100."
+  },
+  {
+    "id": "case_05_subjective_no_invented_price",
+    "category_tag": "edge_subjective_price",
+    "initial_filters": {},
+    "input": "Show me cheap accessories.",
+    "expected_filters": {
+      "category": "accessories"
+    },
+    "expected_product_ids": [6],
+    "expected_summary": "The available accessory is the Backpack ($49)."
+  },
+  {
+    "id": "case_06_exact_boundary_inclusive",
+    "category_tag": "edge_inclusive_bounds",
+    "initial_filters": {},
+    "input": "What clothing items cost at least $15 and at most $45?",
+    "expected_filters": {
+      "category": "clothing",
+      "min_price": 15.0,
+      "max_price": 45.0
+    },
+    "expected_product_ids": [0, 7],
+    "expected_summary": "The clothing items between $15 and $45 inclusive are the UBC Hoodie ($45) and T-Shirt ($15)."
+  },
+  {
+    "id": "case_07_multiturn_context_refinement",
+    "category_tag": "edge_multiturn_state_mutation",
+    "initial_filters": {
+      "category": "clothing"
+    },
+    "input": "Which ones are made of cotton?",
+    "expected_filters": {
+      "category": "clothing",
+      "keyword": "cotton"
+    },
+    "expected_product_ids": [0, 7],
+    "expected_summary": "Within clothing, the cotton items are the UBC Hoodie ($45) and the T-Shirt ($15)."
+  },
+  {
+    "id": "case_08_synonym_food_and_description_keyword",
+    "category_tag": "edge_synonym_and_keyword",
+    "initial_filters": {},
+    "input": "Which food items are red?",
+    "expected_filters": {
+      "category": "groceries",
+      "keyword": "red"
+    },
+    "expected_product_ids": [9],
+    "expected_summary": "The matching grocery item is Organic Apples ($4), described as fresh red apples."
+  }
+]

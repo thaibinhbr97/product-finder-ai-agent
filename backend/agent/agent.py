@@ -17,6 +17,7 @@ from google.adk.tools import ToolContext
 from google.genai import types
 
 from backend.agent.prompts import DEFAULT_PROMPT_VERSION, get_prompt_template
+from backend.agent.resilient_llm import ResilientGeminiLlm
 from backend.services.filter_engine import filter_engine, normalize_filters
 
 STATE_KEY = "active_filters"
@@ -95,13 +96,13 @@ def _make_instruction(prompt_version: str):
     return instruction
 
 
-def _generate_content_config(model: Union[str, BaseLlm]) -> types.GenerateContentConfig:
+def _generate_content_config(model_name: Optional[str]) -> types.GenerateContentConfig:
     config = types.GenerateContentConfig(
-        # Retry transient Gemini API errors (rate limit / overload) instead of failing the turn.
         http_options=types.HttpOptions(
+            timeout=15000,
             retry_options=types.HttpRetryOptions(
-                attempts=3, http_status_codes=[429, 500, 502, 503, 504]
-            )
+                attempts=1, http_status_codes=[500, 502, 503, 504]
+            ),
         ),
     )
     # Gemini 3 models are tuned for the default temperature (1.0); only override if asked.
@@ -109,7 +110,7 @@ def _generate_content_config(model: Union[str, BaseLlm]) -> types.GenerateConten
         config.temperature = float(os.environ["GEMINI_TEMPERATURE"])
     # Low thinking keeps tool-call latency down. Set GEMINI_THINKING_LEVEL="" to disable.
     thinking_level = os.environ.get("GEMINI_THINKING_LEVEL", "low").strip()
-    if thinking_level and isinstance(model, str):
+    if thinking_level and model_name:
         config.thinking_config = types.ThinkingConfig(thinking_level=thinking_level.upper())
     return config
 
@@ -118,13 +119,17 @@ def build_agent(
     model: Union[str, BaseLlm, None] = None,
     prompt_version: Optional[str] = None,
 ) -> Agent:
-    model = model or os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
+    resolved = model or os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
+    model_name = resolved if isinstance(resolved, str) else None
+    llm_model: Union[str, BaseLlm] = (
+        ResilientGeminiLlm(model=resolved) if isinstance(resolved, str) else resolved
+    )
     prompt_version = prompt_version or os.environ.get("PROMPT_VERSION", DEFAULT_PROMPT_VERSION)
     return Agent(
         name="product_finder",
         description="Finds products in the store catalog from natural language queries.",
-        model=model,
+        model=llm_model,
         instruction=_make_instruction(prompt_version),
         tools=[filter_products],
-        generate_content_config=_generate_content_config(model),
+        generate_content_config=_generate_content_config(model_name),
     )

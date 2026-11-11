@@ -8,5 +8,6 @@ __pycache__/
 .deepeval/
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 evaluation/results/
 .DS_Store
