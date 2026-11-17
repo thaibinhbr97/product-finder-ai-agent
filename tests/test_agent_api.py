@@ -4,18 +4,54 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from google.adk.tools.function_tool import FunctionTool
 
 from backend.agent.agent import build_agent
 from backend.main import app, get_agent_service
 
+# def test_tool_declaration_hides_tool_context():
+#     from google.adk.tools import FunctionTool
+
+#     agent = build_agent(model="gemini-3.8-flash")
+#     decl = FunctionTool(agent.tools[0])._get_declaration()
+#     schema = decl.parameters_json_schema or decl.parameters.model_dump(exclude_none=True)
+#     text = json.dumps(schema, default=str)
+#     assert decl.name == "filter_products"
+#     for p in ("category", "min_price", "max_price", "keyword"):
+#         assert p in text
+#     assert "tool_context" not in text
+
+
+# def test_thinking_config_is_valid_type():
+#     cfg = build_agent(model="gemini-3.8-flash").generate_content_config
+#     assert cfg.thinking_config.thinking_level.name == "LOW"
+
+
 
 def test_tool_declaration_hides_tool_context():
-    from google.adk.tools import FunctionTool
+    agent = build_agent(model="gemini-3.8-flash")  # or your target model
+    raw_tool = agent.tools[0]
 
-    agent = build_agent(model="gemini-3.8-flash")
-    decl = FunctionTool(agent.tools[0])._get_declaration()
-    schema = decl.parameters_json_schema or decl.parameters.model_dump(exclude_none=True)
+    # If it is already a FunctionTool or BaseTool, get declaration directly;
+    # otherwise wrap callable in FunctionTool
+    if isinstance(raw_tool, FunctionTool):
+        tool_instance = raw_tool
+    elif callable(raw_tool):
+        tool_instance = FunctionTool(raw_tool)
+    else:
+        raise AssertionError(f"Expected FunctionTool or callable, got {type(raw_tool)}")
+
+    decl = tool_instance._get_declaration()
+    assert decl is not None, "Tool declaration should not be None"
+
+    # Safely extract schema
+    schema = (
+        decl.parameters_json_schema
+        if getattr(decl, "parameters_json_schema", None) is not None
+        else (decl.parameters.model_dump(exclude_none=True) if decl.parameters else {})
+    )
     text = json.dumps(schema, default=str)
+
     assert decl.name == "filter_products"
     for p in ("category", "min_price", "max_price", "keyword"):
         assert p in text
@@ -24,7 +60,11 @@ def test_tool_declaration_hides_tool_context():
 
 def test_thinking_config_is_valid_type():
     cfg = build_agent(model="gemini-3.8-flash").generate_content_config
+    assert cfg is not None, "generate_content_config should not be None"
+    assert cfg.thinking_config is not None, "thinking_config should not be None"
+    assert cfg.thinking_config.thinking_level is not None, "thinking_level should not be None"
     assert cfg.thinking_config.thinking_level.name == "LOW"
+
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ for p in (str(ROOT_DIR), str(VENV_SITE)):
         sys.path.insert(0, p)
 
 from fastapi.testclient import TestClient  # noqa: E402
+
 from backend.main import app  # noqa: E402
 
 
